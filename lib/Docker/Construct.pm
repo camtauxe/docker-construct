@@ -1,6 +1,6 @@
 package Docker::Construct;
 
-use 5.006;
+use 5.012;
 use strict;
 use warnings;
 
@@ -111,7 +111,7 @@ sub construct {
     my %wh;
     for my $layer ( @{$manifest{Layers}} ) {
         my $layer_abbrev = substr($layer,0,12);
-        print STDERR "reading layer: $layer_abbrev...\n";
+        print STDERR "reading layer: $layer_abbrev...\n" unless $params{quiet};
 
         $wh{$layer} = [];
 
@@ -138,7 +138,7 @@ sub construct {
     # the files that are meant to be deleted after each layer.
     for my $layer ( @{$manifest{Layers}} ) {
         my $layer_abbrev    = substr $layer, 0, 12;
-        print STDERR "extracting layer: $layer_abbrev...\n";
+        print STDERR "extracting layer: $layer_abbrev...\n" unless $params{quiet};
 
         my $layer_fh    = _stream_file_from_tar($image, $layer);
         my $extract_fh  = _exec_tar($layer_fh, '-C', $dir, qw'-x --exclude .wh.*');
@@ -159,7 +159,28 @@ sub construct {
             }
         }
     }
-    print "done.\n";
+
+    if ($params{include_config}) {
+        my $config = $manifest{Config};
+        carp "wanted to include config json but couldn't find it in manifest." unless defined $config;
+
+        print STDERR "extracting config: $config...\n" unless $params{quiet};
+
+        my $outfile = catfile $dir, 'config.json';
+        open(my $config_write, '>', $outfile) or croak "could not open $outfile: $!";
+
+        my $config_read = _exec_tar($image, '-xO', $config);
+        while(<$config_read>) {
+            print $config_write $_;
+        }
+
+        close $config_write  or croak        "could not close $outfile: $!";
+        close $config_read   or croak $! ?   "could not close pipe: $!"
+                                         :   "exit code $? from tar";
+
+    }
+
+    print STDERR "done.\n" unless $params{quiet};
 
 }
 
