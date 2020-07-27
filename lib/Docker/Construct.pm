@@ -39,6 +39,8 @@ our @EXPORT_OK = qw(construct);
 use Carp;
 use JSON;
 use Scalar::Util qw(openhandle);
+use File::Spec::Functions qw(splitpath catfile);
+use File::Path qw(remove_tree);
 
 =head1 construct()
 
@@ -73,6 +75,7 @@ root of the extracted filesystem.
 
 =cut
 sub construct {
+    # Parse parameters
     my %params;
     if ( @_ == 2 ) {
         ( $params{image}, $params{dir} ) = @_;
@@ -88,51 +91,80 @@ sub construct {
     croak "file not found: $image"      unless -f $image;
     croak "directory not found: $dir"   unless -d $dir;
 
+    # Get list of files in initial image
     my @imagefiles = _read_file_list($image);
 
     croak "this does not seem to be a docker image (missing manifest.json)"
         unless grep {$_ eq 'manifest.json'} @imagefiles;
 
+    # Extract image manifest.
     my %manifest = %{
         decode_json(
             _read_file_from_tar($image, 'manifest.json')
         )->[0]
     };
 
+    # We're gonna create a list of the whiteout files in the image
+    # (keyed by layer). The whiteout files indicate files from
+    # previous layers to be deleted and are named after the files
+    # they delete but prefixed with `.wh.`
+    my %wh;
     for my $layer ( @{$manifest{Layers}} ) {
-        print STDERR "reading layer: $layer...\n";
-        my $layer       = _stream_file_from_tar($image, $layer);
-        my $filelist    = _exec_tar($layer, '-t');
+        my $layer_abbrev = substr($layer,0,12);
+        print STDERR "reading layer: $layer_abbrev...\n";
 
-        my $numfiles = 0;
+        $wh{$layer} = [];
+
+        my $layer_fh    = _stream_file_from_tar($image, $layer);
+        my $filelist    = _exec_tar($layer_fh, '-t');
+
         while (<$filelist>) {
-            $numfiles++;
+            chomp;
+            my ($dirname, $basename) = (splitpath $_)[1,2];
+            if ($basename =~ /^\.wh\./) {
+                my $to_delete = catfile $dirname, ( $basename =~ s/^\.wh\.//r );
+                push @{ $wh{$layer} }, $_;
+            }
         }
-        print STDERR "($numfiles file(s))\n";
+
+        close $filelist     or croak $! ?   "could not close pipe: $!"
+                                        :   "exit code $? from tar";
+        close $layer_fh     or croak $! ?   "could not close pipe: $!"
+                                        :   "exit code $? from tar";
 
     }
+
+    # Extract each layer, ignoring the whiteout files and then removing
+    # the files that are meant to be deleted after each layer.
+    for my $layer ( @{$manifest{Layers}} ) {
+        my $layer_abbrev    = substr $layer, 0, 12;
+        print STDERR "extracting layer: $layer_abbrev...\n";
+
+        my $layer_fh    = _stream_file_from_tar($image, $layer);
+        my $extract_fh  = _exec_tar($layer_fh, '-C', $dir, qw'-x --exclude .wh.*');
+
+        close $extract_fh   or croak $! ?   "could not close pipe: $!"
+                                        :   "exit code $? from tar";
+        close $layer_fh     or croak $! ?   "could not close pipe: $!"
+                                        :   "exit code $? from tar";
+
+        for my $file ( @{ $wh{$layer} }) {
+            my $path = catfile $dir, $file;
+            if (-f $path) {
+                unlink $path or carp "failed to remove file: $path";
+            }
+            elsif (-d $path) {
+                remove_tree $path;
+
+            }
+        }
+    }
+    print "done.\n";
+
 }
 
-sub _exec_tar {
-    my $input   = shift;
-    my @args    = @_;
-
-
-    my @command = openhandle $input ? ('tar',               @args)
-                                    : ('tar', '-f', $input, @args);
-
-    my $read_fh;
-    if (openhandle $input) {
-        my $pid = open($read_fh, '-|');
-        croak "could not fork" unless defined $pid;
-        do { open(STDIN, '<&', $input); exec @command; } unless $pid;
-    }
-    else {
-        open ($read_fh, '-|', @command)   or croak "could not exec tar";
-    }
-    return $read_fh;
-}
-
+# Take a tar input (either a filename or a filehandle to one)
+# and return the list of files in the archive.
 sub _read_file_list {
     my $fh = _exec_tar(shift, '-t');
 
@@ -145,6 +177,8 @@ sub _read_file_list {
     return @filelist;
 }
 
+# Take a tar input (either a filename or a filehandle to one)
+# and the name of a file in the archive and return the file's text.
 sub _read_file_from_tar {
     my $fh = _stream_file_from_tar(@_);
     my $content;
@@ -158,11 +192,40 @@ sub _read_file_from_tar {
     return $content;
 }
 
+# Take a tar input (either a filename or a filehandle to one)
+# and the name of a file in the archive and return an open
+# filehandle that streams the file's text.
 sub _stream_file_from_tar {
     my $input = shift;
     my $path    = shift;
 
     return _exec_tar($input, '-xO', $path);
+}
+
+# Takes as its first argument, either the filename for a tar archive
+# or an open filehandle that a tar archive can be read from. The remaining
+# arguments are used as arguments to `tar`. Starts executing the command
+# and the returns a filehandle that streams the command's stdout.
+sub _exec_tar {
+    my $input   = shift;
+    my @args    = @_;
+
+    my $read_fh;
+    if (openhandle $input) {
+        # If input is a filehandle, then we fork and pipe input
+        # through the command to the output handle.
+        my @command = ('tar', @args);
+        my $pid = open($read_fh, '-|');
+        croak "could not fork" unless defined $pid;
+        do { open(STDIN, '<&', $input); exec @command; } unless $pid;
+    }
+    else {
+        # Otherwise, we assume input is a filename and just exec
+        # tar on it.
+        my @command = ('tar', '-f', $input, @args);
+        open ($read_fh, '-|', @command)   or croak "could not exec tar";
+    }
+    return $read_fh;
 }
 
 =head1 AUTHOR
