@@ -15,10 +15,10 @@ my $builder = Module::Build->new(
     },
     test_requires => {
         'Test::More' => '0',
+        'Test::Cmd'  => '1.09'
     },
     requires => {
-        #'ABC'              => '1.6',
-        #'Foo::Bar::Module' => '5.0401',
+        'perl'  => '5.012'
     },
     add_to_cleanup     => [ 'Docker-Construct-*' ],
 );

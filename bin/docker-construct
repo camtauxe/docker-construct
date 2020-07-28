@@ -26,14 +26,13 @@ into.
 
 If specified, will not output progress on stderr.
 
-=back
-
 =item * I<--include_config>
 
 If specified, the image's config json file will be added to the root of the
 extracted filesystem as F<config.json>. (If there happened to be file with
 that name there anyway, this will overwrite it).
 
+=back
 =cut
 
 use Getopt::Long qw(:config auto_help);

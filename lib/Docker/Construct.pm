@@ -42,7 +42,7 @@ use Scalar::Util qw(openhandle);
 use File::Spec::Functions qw(splitpath catfile);
 use File::Path qw(remove_tree);
 
-=head1 construct()
+=head2 construct()
 
 Reconstruct the the filesystem of the specified tarball (output from
 the C<docker save> command) inside the specified directory. If only two
@@ -73,7 +73,9 @@ If true, progress will not be reported on stderr.
 If true, include the image's config json file as F<config.json> in the
 root of the extracted filesystem.
 
+=back
 =cut
+
 sub construct {
     # Parse parameters
     my %params;
@@ -123,7 +125,7 @@ sub construct {
             my ($dirname, $basename) = (splitpath $_)[1,2];
             if ($basename =~ /^\.wh\./) {
                 my $to_delete = catfile $dirname, ( $basename =~ s/^\.wh\.//r );
-                push @{ $wh{$layer} }, $_;
+                push @{ $wh{$layer} }, $to_delete;
             }
         }
 
