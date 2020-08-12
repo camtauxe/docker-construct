@@ -10,7 +10,7 @@ Docker::Construct - Construct the filesystem of an exported docker image.
 
 =cut
 
-our $VERSION = '0.01';
+our $VERSION = '1.0';
 
 =head1 SYNOPSIS
 

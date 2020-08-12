@@ -18,9 +18,19 @@ my $builder = Module::Build->new(
         'Test::Cmd'  => '1.09'
     },
     requires => {
-        'perl'  => '5.012'
+        'perl'  => '5.012',
+        'Carp'  => '0',
+        'JSON'  => '0',
+        'Scalar::Util'  => '0',
+        'File::Spec::Functions'  => '0',
+        'File::Path'  => '0'
     },
     add_to_cleanup     => [ 'Docker-Construct-*' ],
+    meta_merge  => {
+        resources => {
+            repository => 'https://github.com/camtauxe/docker-construct.git'
+        }
+    }
 );
 
 $builder->create_build_script();
